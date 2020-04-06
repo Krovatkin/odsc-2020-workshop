@@ -124,6 +124,21 @@ def get_batch(source, i):
     return data, target
 
 
+#torch._C._jit_set_profiling_executor(False)
+print(model)
+model = torch.jit.script(model)
+# print("first")
+
+# data, targets = get_batch(train_data, 0)
+# hidden = model.init_hidden(args.batch_size)
+# model(data, hidden)
+# print("second")
+# model(data, hidden)
+
+
+# exit(1)
+
+
 def evaluate(data_source):
     # Turn on evaluation mode which disables dropout.
     model.eval()
@@ -157,10 +172,12 @@ def train():
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
         model.zero_grad()
         if args.model == 'Transformer':
+            #print("size=",data.size())
             output = model(data)
             output = output.view(-1, corpus.ntokens)
         else:
             hidden = repackage_hidden(hidden)
+            #print("size=",data.size(),", ", hidden[0].size(), ", ", hidden[1].size(), ", ", data.type(), ",", hidden[0].type())
             output, hidden = model(data, hidden)
         loss = F.nll_loss(output, targets)
         loss.backward()

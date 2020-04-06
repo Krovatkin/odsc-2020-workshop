@@ -3,7 +3,9 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from typing import Tuple, List
+from torch import Tensor
+from torch import nn
 
 class LSTMCell(nn.Module):
     def __init__(self, input_size, hidden_size):
@@ -21,10 +23,9 @@ class LSTMCell(nn.Module):
         nn.init.uniform_(self.weight_hh, -stdv, stdv)
         nn.init.constant_(self.bias, 0)
 
-    def forward(self, input, state):
+    def forward(self, input, state: Tuple[Tensor, Tensor]):
         hx, cx = state
-        gates = (torch.mm(input, self.weight_ih.t()) +
-                 torch.mm(hx, self.weight_hh.t()) + self.bias)
+        gates = torch.mm(input, self.weight_ih.t()) + torch.mm(hx, self.weight_hh.t()) + self.bias
         ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
 
         ingate = torch.sigmoid(ingate)
@@ -43,7 +44,7 @@ class LSTMLayer(nn.Module):
         super().__init__()
         self.cell = LSTMCell(*cell_args)
 
-    def forward(self, input, state):
+    def forward(self, input, state: Tuple[Tensor, Tensor]):
         outputs = []
         for i in input.unbind(0):
             state = self.cell(i, state)
@@ -55,21 +56,22 @@ class LSTM(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers, dropout):
         super().__init__()
         assert num_layers >= 1
-        self.layers = nn.ModuleList([LSTMLayer(input_size, hidden_size)] +
-                                    [LSTMLayer(hidden_size, hidden_size)
-                                     for _ in range(num_layers - 1)])
-        self.dropout = nn.Dropout(dropout)
+        #self.layers = nn.ModuleList([LSTMLayer(input_size, hidden_size)] +
+                                    # [LSTMLayer(hidden_size, hidden_size)
+                                    #  for _ in range(num_layers - 1)])
+                                     
+        self.layers = nn.ModuleList([nn.LSTM(input_size, hidden_size, 2, dropout = dropout)])
+        # self.dropout = nn.Dropout(dropout)
         self.num_layers = num_layers
 
-    def forward(self, input, states):
-        output_states = []
+    def forward(self, input, states: Tuple[Tensor, Tensor]):
+        output_states = torch.jit.annotate(List[Tuple[Tensor, Tensor]], [])
         output = input
         for i, layer in enumerate(self.layers):
-            state = states[i]
-            output, out_state = layer(output, (state[0], state[1]))
+            output, out_state = layer(output, (states[0][i], states[1][i]))
             # Apply the dropout layer except the last layer
-            if i < self.num_layers - 1:
-                output = self.dropout(output)
+            # if i < self.num_layers - 1:
+            #     output = self.dropout(output)
             output_states.append(out_state)
         return output, (torch.stack([s[0] for s in output_states]),
                         torch.stack([s[1] for s in output_states]))
@@ -98,7 +100,7 @@ class RNNModel(nn.Module):
         self.decoder.bias.data.zero_()
         self.decoder.weight.data.uniform_(-initrange, initrange)
 
-    def forward(self, input, hidden):
+    def forward(self, input, hidden: Tuple[Tensor, Tensor]):
         emb = self.drop(self.encoder(input))
         output, hidden = self.rnn(emb, hidden)
         output = self.drop(output)
@@ -106,7 +108,9 @@ class RNNModel(nn.Module):
         decoded = decoded.view(-1, self.ntoken)
         return F.log_softmax(decoded, dim=1), hidden
 
-    def init_hidden(self, bsz):
+
+    @torch.jit.export
+    def init_hidden(self, bsz: int):
         weight = self.decoder.weight
         return (weight.new_zeros(self.nlayers, bsz, self.nhid),
                 weight.new_zeros(self.nlayers, bsz, self.nhid))
